@@ -19,6 +19,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponseS
     });
     // append SocketIO server to Next.js socket server response
     res.socket.server.io = io;
+    io.on("connection", (socket) => {
+      console.log("New client connected");
+      socket.on("disconnect", () => {
+        console.log("Client disconnected");
+      });
+    });
   }
   res.end();
 }

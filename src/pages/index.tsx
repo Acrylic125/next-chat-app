@@ -2,21 +2,72 @@ import Head from "next/head";
 import Image from "next/image";
 import styles from "@/styles/Home.module.css";
 import * as io from "socket.io-client";
-import { useEffect, useState } from "react";
-import { z } from "zod";
+import { useEffect, useRef, useState } from "react";
 import type { Message } from "@/types/message";
+import Button from "@mui/material/Button";
+import { Box, Container, FormControl, Input, OutlinedInput, Stack, TextField, Typography } from "@mui/material";
+import CircleIcon from "@mui/icons-material/Circle";
+import cx from "classnames";
+import { useMutation } from "react-query";
 
 // const inter = Inter({ subsets: ["latin"] });
 const user = "user" + Math.floor(Math.random() * 1000);
 
-const MessageBox = () => {
+const ChatHeader = ({
+  chatName,
+  connections,
+  connectionStatus,
+}: {
+  chatName: string;
+  connections: number;
+  connectionStatus: "connected" | "disconnected" | "connecting";
+}) => {
+  return (
+    <Stack bgcolor="grey.800" direction="row" alignItems="center" justifyContent="space-between" className="px-6 py-4">
+      <Stack direction="column" className="gap-1">
+        <Typography variant="h4" component="h1" color="grey.50" className="font-bold">
+          {chatName}
+        </Typography>
+        <Stack direction="row" alignItems="center" className="gap-2">
+          <CircleIcon color={connectionStatus === "connected" ? "success" : connectionStatus === "disconnected" ? "error" : "warning"} />
+          <Typography variant="h5" component="p" color="grey.200">
+            {connections} connected
+          </Typography>
+        </Stack>
+      </Stack>
+    </Stack>
+  );
+};
+
+const MessageBlob = ({ message, self }: { message: Message; self?: boolean }) => {
+  return (
+    <Stack
+      direction="column"
+      alignItems={self ? "flex-end" : "flex-start"}
+      bgcolor={self ? "primary.500" : "grey.800"}
+      className={cx("w-fit px-6 py-4 rounded-xl", {
+        "rounded-br-none": self,
+        "rounded-bl-none": !self,
+      })}
+    >
+      <Typography variant="h5" component="p" color="grey.50" className="font-bold">
+        {message.user}
+      </Typography>
+      <Typography variant="h5" component="p" color="grey.200">
+        {message.text}
+      </Typography>
+    </Stack>
+  );
+};
+
+const MessageInput = ({ onMessageSent }: { onMessageSent?: (message: Message) => void }) => {
   const [message, setMessage] = useState<string>("");
-  const sendMessage = async () => {
-    if (message) {
+  const { isLoading, mutate: sendMessage } = useMutation(
+    async ({ text }: { text: string }) => {
       // build message obj
       const messageObj = {
         user,
-        text: message,
+        text,
       };
 
       // dispatch message to other users
@@ -27,35 +78,60 @@ const MessageBox = () => {
         },
         body: JSON.stringify(messageObj),
       });
-
-      // reset field if OK
-      if (resp.ok) setMessage("");
+      if (!resp.ok) throw new Error("Error sending message");
+      return resp.json();
+    },
+    {
+      onSuccess: (message) => {
+        onMessageSent && onMessageSent(message);
+        setMessage("");
+      },
     }
-  };
+  );
+
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        sendMessage();
+        if (message) {
+          sendMessage({
+            text: message,
+          });
+        }
       }}
+      className="flex gap-4"
     >
-      <input
-        type="text"
-        name="message"
-        className="bg-slate-50 w-full"
-        onChange={(e) => {
-          setMessage(e.target.value);
-        }}
-        value={message}
-      />
-      <button>Send</button>
+      <FormControl className="flex-1">
+        <TextField
+          onChange={(e) => {
+            setMessage(e.target.value);
+          }}
+          value={message}
+          variant="outlined"
+          className="w-full"
+          label="Message"
+          placeholder="Please enter text"
+          color="primary"
+        />
+      </FormControl>
+      <Button type="submit" variant="contained" disabled={isLoading}>
+        Send
+      </Button>
     </form>
   );
 };
 
 export default function Home() {
-  const [connected, setConnected] = useState<boolean>(false);
+  const [connectedStatus, setConnectedStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
   const [chat, setChat] = useState<Message[]>([]);
+  const chatRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottomOfChat = () => {
+    chatRef.current?.scrollTo({
+      top: chatRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  };
 
   useEffect((): any => {
     // connect to socket server
@@ -66,7 +142,11 @@ export default function Home() {
     // log socket connection
     socket.on("connect", () => {
       console.log("SOCKET CONNECTED!", socket.id);
-      setConnected(true);
+      setConnectedStatus("connected");
+    });
+    socket.on("disconnect", () => {
+      console.log("SOCKET DISCONNECTED!");
+      setConnectedStatus("disconnected");
     });
 
     // update chat on new message dispatched
@@ -78,7 +158,7 @@ export default function Home() {
 
     // socket disconnet onUnmount if exists
     if (socket) return () => socket.disconnect();
-  }, [setChat, setConnected]);
+  }, [setChat, setConnectedStatus]);
 
   return (
     <>
@@ -88,16 +168,30 @@ export default function Home() {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" href="/favicon.ico" />
       </Head>
-      <h1>Connected: {`${connected}`}</h1>
-      <div>
-        {chat.map((message) => (
-          <div key={message.id}>
-            <h2>{message.user}</h2>
-            <p>{message.text}</p>
-          </div>
-        ))}
-      </div>
-      <MessageBox />
+      <Stack component="main" direction="column" className="relative h-full">
+        <Box className="sticky top-0">
+          <ChatHeader chatName="Chat App" connections={0} connectionStatus={connectedStatus} />
+        </Box>
+        <Container className="grow w-full flex-1 flex overflow-y-auto" maxWidth="xl" ref={chatRef}>
+          <Stack direction="column" className="w-full gap-2 py-8">
+            {chat.map((message) => (
+              <Box
+                key={message.id}
+                className={cx("w-full mx-0", {
+                  "flex justify-end": message.user === user,
+                })}
+              >
+                <Box className="max-w-2xl">
+                  <MessageBlob message={message} self={message.user === user} />
+                </Box>
+              </Box>
+            ))}
+          </Stack>
+        </Container>
+        <Container className="sticky bottom-0 pb-16" maxWidth="xl">
+          <MessageInput onMessageSent={scrollToBottomOfChat} />
+        </Container>
+      </Stack>
     </>
   );
 }
