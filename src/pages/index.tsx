@@ -1,11 +1,85 @@
-import Head from 'next/head'
-import Image from 'next/image'
-import { Inter } from '@next/font/google'
-import styles from '@/styles/Home.module.css'
+import Head from "next/head";
+import Image from "next/image";
+import styles from "@/styles/Home.module.css";
+import * as io from "socket.io-client";
+import { useEffect, useState } from "react";
+import { z } from "zod";
+import type { Message } from "@/types/message";
 
-const inter = Inter({ subsets: ['latin'] })
+// const inter = Inter({ subsets: ["latin"] });
+const user = "user" + Math.floor(Math.random() * 1000);
+
+const MessageBox = () => {
+  const [message, setMessage] = useState<string>("");
+  const sendMessage = async () => {
+    if (message) {
+      // build message obj
+      const messageObj = {
+        user,
+        text: message,
+      };
+
+      // dispatch message to other users
+      const resp = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(messageObj),
+      });
+
+      // reset field if OK
+      if (resp.ok) setMessage("");
+    }
+  };
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        sendMessage();
+      }}
+    >
+      <input
+        type="text"
+        name="message"
+        className="bg-slate-50 w-full"
+        onChange={(e) => {
+          setMessage(e.target.value);
+        }}
+        value={message}
+      />
+      <button>Send</button>
+    </form>
+  );
+};
 
 export default function Home() {
+  const [connected, setConnected] = useState<boolean>(false);
+  const [chat, setChat] = useState<Message[]>([]);
+
+  useEffect((): any => {
+    // connect to socket server
+    const socket = io.connect(process.env.NEXT_PUBLIC_BASE_URL ?? "", {
+      path: "/api/socket",
+    });
+
+    // log socket connection
+    socket.on("connect", () => {
+      console.log("SOCKET CONNECTED!", socket.id);
+      setConnected(true);
+    });
+
+    // update chat on new message dispatched
+    socket.on("message", (message: Message) => {
+      setChat((chat) => {
+        return [...chat, message];
+      });
+    });
+
+    // socket disconnet onUnmount if exists
+    if (socket) return () => socket.disconnect();
+  }, [setChat, setConnected]);
+
   return (
     <>
       <Head>
@@ -14,8 +88,16 @@ export default function Home() {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" href="/favicon.ico" />
       </Head>
-      
-      
+      <h1>Connected: {`${connected}`}</h1>
+      <div>
+        {chat.map((message) => (
+          <div key={message.id}>
+            <h2>{message.user}</h2>
+            <p>{message.text}</p>
+          </div>
+        ))}
+      </div>
+      <MessageBox />
     </>
-  )
+  );
 }
